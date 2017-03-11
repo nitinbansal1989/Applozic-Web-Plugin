@@ -6854,6 +6854,7 @@ var MCK_CLIENT_GROUP_MAP = [];
             var events = $this.events;
             var subscriber = null;
             var stompClient = null;
+            var mqttClient = null;
             var TYPING_TAB_ID = '';
             var typingSubscriber = null;
             var openGroupSubscriber = [];
@@ -6868,27 +6869,36 @@ var MCK_CLIENT_GROUP_MAP = [];
             var $mck_typing_label = $applozic('#mck-typing-label');
             var $mck_message_inner = $applozic("#mck-message-cell .mck-message-inner");
             _this.init = function() {
-                if (typeof MCK_WEBSOCKET_URL !== 'undefined') {
-                    var port = (!mckUtils.startsWith(MCK_WEBSOCKET_URL, "https")) ? "15674" : "15675";
-                    if (typeof w.SockJS === 'function') {
-                        if (!SOCKET) {
-                            SOCKET = new SockJS(MCK_WEBSOCKET_URL + ":" + port + "/stomp");
-                        }
-                        stompClient = w.Stomp.over(SOCKET);
-                        stompClient.heartbeat.outgoing = 0;
-                        stompClient.heartbeat.incoming = 0;
-                        stompClient.onclose = function() {
-                            _this.disconnect();
-                        };
-                        stompClient.connect("guest", "guest", _this.onConnect, _this.onError, '/');
+                // if (typeof MCK_WEBSOCKET_URL !== 'undefined') {
+                if (MCK_WEBSOCKET_URL) {
+                    // var port = (!mckUtils.startsWith(MCK_WEBSOCKET_URL, "https")) ? "15674" : "15675";
+                    port = 80;
+                    // if (typeof w.SockJS === 'function') {
+                        // if (!SOCKET) {
+                        //     SOCKET = new SockJS(MCK_WEBSOCKET_URL + ":" + port + "/stomp");
+                        // }
+                        mqttClient = new Paho.MQTT.Client(MCK_WEBSOCKET_URL, port);
+                        // stompClient = w.Stomp.over(SOCKET);
+                        // stompClient.heartbeat.outgoing = 0;
+                        // stompClient.heartbeat.incoming = 0;
+                        // stompClient.onclose = function() {
+                        //     _this.disconnect();
+                        // };
+                        mqttClient.onConnectionLost = _this.disconnect();
+                        // stompClient.connect("guest", "guest", _this.onConnect, _this.onError, '/');
+                        mqttClient.connect({
+                            userName: "guest",
+                            password: "guest",
+                            onSuccess: _this.onConnect
+                        });
                         w.addEventListener("beforeunload", function(e) {
                             _this.disconnect();
                         });
-                    }
+                    // }
                 }
             };
             _this.checkConnected = function(isFetchMessages) {
-                if (stompClient.connected) {
+                if (mqttClient.connected) {
                     if (checkConnectedIntervalId) {
                         clearInterval(checkConnectedIntervalId);
                     }
@@ -6906,7 +6916,7 @@ var MCK_CLIENT_GROUP_MAP = [];
                 }
             };
             _this.connectToSocket = function(isFetchMessages) {
-                if (!stompClient.connected) {
+                if (!mqttClient.connected) {
                     if (isFetchMessages && $mck_sidebox.css('display') === 'block') {
                         var currTabId = $mck_message_inner.data('mck-id');
                         if (currTabId) {
@@ -6943,13 +6953,18 @@ var MCK_CLIENT_GROUP_MAP = [];
                 _this.disconnect();
             };
             _this.disconnect = function() {
-                if (stompClient && stompClient.connected) {
+                // if (stompClient && stompClient.connected) {
+                //     _this.sendStatus(0);
+                //     stompClient.disconnect();
+                // }
+                if (mqttClient && mqttClient.connected) {
                     _this.sendStatus(0);
-                    stompClient.disconnect();
+                    mqttClient.disconnect();
                 }
             };
             _this.unsubscibeToTypingChannel = function() {
-                if (stompClient && stompClient.connected) {
+                // if (stompClient && stompClient.connected) {
+                if (mqttClient && mqttClient.connected) {
                     if (typingSubscriber) {
                         if (MCK_TYPING_STATUS === 1) {
                             _this.sendTypingStatus(0, TYPING_TAB_ID);
@@ -6960,7 +6975,7 @@ var MCK_CLIENT_GROUP_MAP = [];
                 typingSubscriber = null;
             };
             _this.unsubscibeToNotification = function() {
-                if (stompClient && stompClient.connected) {
+                if (mqttClient && mqttClient.connected) {
                     if (subscriber) {
                         subscriber.unsubscribe();
                     }
@@ -6969,15 +6984,17 @@ var MCK_CLIENT_GROUP_MAP = [];
             };
             _this.subscibeToTypingChannel = function(tabId, isGroup) {
                 var subscribeId = (isGroup) ? tabId : MCK_USER_ID;
-                if (stompClient && stompClient.connected) {
-                    typingSubscriber = stompClient.subscribe("/topic/typing-" + MCK_APP_ID + "-" + subscribeId, _this.onTypingStatus);
+                if (mqttClient && mqttClient.connected) {
+                    // typingSubscriber = stompClient.subscribe("/topic/typing-" + MCK_APP_ID + "-" + subscribeId, _this.onTypingStatus);
+                    mqttClient.subscribe("/topic/typing-" + MCK_APP_ID + "-" + subscribeId);
                 } else {
                     _this.reconnect();
                 }
             };
             _this.subscribeToOpenGroup = function(group) {
-                if (stompClient && stompClient.connected) {
-                    var subs = stompClient.subscribe("/topic/group-" + MCK_APP_ID + "-" + group.contactId, _this.onOpenGroupMessage);
+                if (mqttClient && mqttClient.connected) {
+                    // var subs = stompClient.subscribe("/topic/group-" + MCK_APP_ID + "-" + group.contactId, _this.onOpenGroupMessage);
+                    mqttClient.subscribe("/topic/group-" + MCK_APP_ID + "-" + group.contactId);
                     openGroupSubscriber.push(subs.id);
                     OPEN_GROUP_SUBSCRIBER_MAP[group.contactId] = subs.id;
                 } else {
@@ -6985,27 +7002,30 @@ var MCK_CLIENT_GROUP_MAP = [];
                 }
             };
             _this.sendTypingStatus = function(status, tabId) {
-                if (stompClient && stompClient.connected) {
+                if (mqttClient && mqttClient.connected) {
                     if (status === 1 && MCK_TYPING_STATUS === 1) {
-                        stompClient.send('/topic/typing-' + MCK_APP_ID + "-" + TYPING_TAB_ID, {
-                            "content-type": "text/plain"
-                        }, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
+                        // stompClient.send('/topic/typing-' + MCK_APP_ID + "-" + TYPING_TAB_ID, {
+                        //     "content-type": "text/plain"
+                        // }, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
+                        mqttClient.send('/topic/typing-' + MCK_APP_ID + "-" + TYPING_TAB_ID, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
                     }
                     if (tabId) {
                         if (tabId === TYPING_TAB_ID && status === MCK_TYPING_STATUS && status === 1) {
                             return;
                         }
                         TYPING_TAB_ID = tabId;
-                        stompClient.send('/topic/typing-' + MCK_APP_ID + "-" + tabId, {
-                            "content-type": "text/plain"
-                        }, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
+                        // stompClient.send('/topic/typing-' + MCK_APP_ID + "-" + tabId, {
+                        //     "content-type": "text/plain"
+                        // }, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
+                        mqttClient.send('/topic/typing-' + MCK_APP_ID + "-" + tabId, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
                         setTimeout(function() {
                             MCK_TYPING_STATUS = 0;
                         }, 60000);
                     } else if (status === 0) {
-                        stompClient.send('/topic/typing-' + MCK_APP_ID + "-" + TYPING_TAB_ID, {
-                            "content-type": "text/plain"
-                        }, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
+                        // stompClient.send('/topic/typing-' + MCK_APP_ID + "-" + TYPING_TAB_ID, {
+                        //     "content-type": "text/plain"
+                        // }, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
+                        mqttClient.send('/topic/typing-' + MCK_APP_ID + "-" + TYPING_TAB_ID, MCK_APP_ID + "," + MCK_USER_ID + "," + status);
                     }
                     MCK_TYPING_STATUS = status;
                 }
@@ -7070,23 +7090,26 @@ var MCK_CLIENT_GROUP_MAP = [];
                 events.onConnectFailed();
             };
             _this.sendStatus = function(status) {
-                if (stompClient && stompClient.connected) {
-                    stompClient.send('/topic/status-v2', {
-                        "content-type": "text/plain"
-                    }, MCK_TOKEN + "," + USER_DEVICE_KEY + "," + status);
+                if (mqttClient && mqttClient.connected) {
+                    // stompClient.send('/topic/status-v2', {
+                    //     "content-type": "text/plain"
+                    // }, MCK_TOKEN + "," + USER_DEVICE_KEY + "," + status);
+                    mqttClient.send('/topic/status-v2', MCK_TOKEN + "," + USER_DEVICE_KEY + "," + status);
                 }
             };
             _this.onConnect = function() {
-                if (stompClient.connected) {
+                if (mqttClient.connected) {
                     if (subscriber) {
                         _this.unsubscibeToNotification();
                     }
-                    subscriber = stompClient.subscribe("/topic/" + MCK_TOKEN, _this.onMessage);
+                    // subscriber = stompClient.subscribe("/topic/" + MCK_TOKEN, _this.onMessage);
+                    mqttClient.subscribe("/topic/" + MCK_TOKEN);
                     _this.sendStatus(1);
                     _this.checkConnected(true);
                 } else {
                     setTimeout(function() {
-                        subscriber = stompClient.subscribe("/topic/" + MCK_TOKEN, _this.onMessage);
+                        // subscriber = stompClient.subscribe("/topic/" + MCK_TOKEN, _this.onMessage);
+                        mqttClient.subscribe("/topic/" + MCK_TOKEN);
                         _this.sendStatus(1);
                         _this.checkConnected(true);
                     }, 5000);
@@ -7165,8 +7188,8 @@ var MCK_CLIENT_GROUP_MAP = [];
                 }
             };
             _this.onMessage = function(obj) {
-                if (subscriber != null && subscriber.id === obj.headers.subscription) {
-                    var resp = $applozic.parseJSON(obj.body);
+                // if (subscriber != null && subscriber.id === obj.headers.subscription) {
+                    var resp = $applozic.parseJSON(obj.payload);
                     var messageType = resp.type;
                     if (messageType === "APPLOZIC_04" || messageType === "MESSAGE_DELIVERED") {
                         $applozic("." + resp.message.split(",")[0] + " .mck-message-status").removeClass('mck-icon-time').removeClass('mck-icon-sent').addClass('mck-icon-delivered');
@@ -7418,7 +7441,7 @@ var MCK_CLIENT_GROUP_MAP = [];
                             mckMessageLayout.populateMessage(messageType, message, resp.notifyUser);
                         }
                     }
-                }
+                // }
             };
         }
     }
